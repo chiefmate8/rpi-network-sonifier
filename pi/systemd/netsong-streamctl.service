@@ -1,0 +1,12 @@
+[Unit]
+Description=netsong stream on/off switch (follows the visualiser)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/netsong-streamctl.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

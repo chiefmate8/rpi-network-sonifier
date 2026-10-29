@@ -1,0 +1,18 @@
+[Unit]
+Description=netsong audio stream to the server
+After=netsong.service network-online.target
+Wants=network-online.target
+PartOf=netsong.service
+
+[Service]
+User=YOUR_USER
+Environment=JACK_NO_START_SERVER=1
+Nice=10
+ExecStart=/usr/bin/ffmpeg -nostdin -hide_banner -loglevel warning -f jack -i ffmpeg -ac 2 -codec:a libmp3lame -b:a 128k -ice_name sonifier -f mp3 icecast://source:ICECAST_SOURCE_PASSWORD@SERVER_IP:8000/sonifier
+ExecStartPost=/bin/sh -c 'sleep 5; jack_connect SuperCollider:out_1 ffmpeg:input_1; jack_connect SuperCollider:out_2 ffmpeg:input_2'
+Restart=always
+RestartSec=5
+
+# Not enabled at boot: netsong-streamctl starts and stops it.
+[Install]
+WantedBy=multi-user.target

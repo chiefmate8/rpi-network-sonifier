@@ -1,0 +1,16 @@
+[Unit]
+Description=netsong music engine (JACK + SuperCollider)
+After=sound.target
+
+[Service]
+User=YOUR_USER
+WorkingDirectory=/home/YOUR_USER
+EnvironmentFile=/home/YOUR_USER/netsong.conf
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+ExecStart=/home/YOUR_USER/netsong-audio.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,13 @@
+[Unit]
+Description=netsong packet sniffer
+After=netsong.service network-online.target
+Wants=network-online.target
+PartOf=netsong.service
+
+[Service]
+ExecStart=/usr/bin/python3 /home/YOUR_USER/netsniff.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
