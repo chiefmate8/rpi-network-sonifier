@@ -1,0 +1,6 @@
+.env
+visualiser/devices.json
+samples/
+*.bak*
+*.tgz
+__pycache__/
