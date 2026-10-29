@@ -2,7 +2,12 @@
 
 A Raspberry Pi that listens to my home network and plays it as generative electronic music. Every packet and every nearby Bluetooth device becomes a sound.
 
-![The visualiser and the CLI view side by side.](docs/images/visualiser-both.png)
+<table>
+  <tr>
+    <td width="62%"><img src="docs/images/visualiser.png" alt="The visuals: each device is a node around the sonifier, and each sound is a pulse that flies in and lands on the beat."></td>
+    <td width="38%"><img src="docs/images/cli.png" alt="The CLI view: which packet triggered which instrument."></td>
+  </tr>
+</table>
 
 ## What it does
 
