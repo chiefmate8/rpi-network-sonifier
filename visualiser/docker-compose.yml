@@ -1,0 +1,12 @@
+services:
+  sonifier-viz:
+    build: .
+    container_name: sonifier-viz
+    restart: unless-stopped
+    ports:
+      - "8095:8080"       # web page: http://<server>:8095
+      - "5005:5005/udp"   # events from the sonifier
+    volumes:
+      - ./devices.json:/app/devices.json:ro
+    environment:
+      - FAKE=auto         # auto | on | off

@@ -1,0 +1,7 @@
+{
+  "_note": "Map a MAC address (lowercase) or an IP to a friendly name. Copy this file to devices.json and fill in your own devices.",
+  "aa:bb:cc:00:00:01": "living room speaker",
+  "aa:bb:cc:00:00:02": "lights bridge",
+  "aa:bb:cc:00:00:03": "doorbell",
+  "aa:bb:cc:00:00:04": "router"
+}
