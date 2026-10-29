@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>sonifier</title>
+<style>
+  :root { --ink: #130f1b; --paper: #e9e4f2; --dim: rgba(233, 228, 242, 0.45); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--ink); overflow: hidden; }
+  body { font: 13px/1.3 "Avenir Next", "Segoe UI", system-ui, sans-serif; color: var(--paper); }
+  canvas { position: fixed; top: 0; left: 0; width: var(--sw, 100%); height: var(--sh, 100%); display: block; }
+  body.idle { cursor: none; }
+  .fade { transition: opacity 0.6s; }
+  body.idle .fade { opacity: 0; }
+  body.idle #picker { pointer-events: none; }   /* hidden buttons cannot be pressed by accident */
+  #status { position: fixed; top: max(14px, env(safe-area-inset-top)); right: 16px;
+    display: flex; align-items: center; gap: 8px; color: var(--dim); pointer-events: none; }
+  #status i { width: 7px; height: 7px; border-radius: 50%; background: #777; }
+  #status.live i { background: #7be0a8; box-shadow: 0 0 8px #7be0a8; }
+  #status.demo i { background: #f2b35a; }
+  #status.down i { background: #ff7a6b; }
+  #picker { position: fixed; bottom: max(14px, env(safe-area-inset-bottom)); left: 50%;
+    transform: translateX(-50%); display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; width: max-content; max-width: calc(100vw - 20px); }
+  #picker button { font: inherit; color: var(--dim); background: rgba(19,15,27,0.6);
+    border: 1px solid rgba(233,228,242,0.14); border-radius: 999px; padding: 5px 13px; cursor: pointer; }
+  #picker button:hover { color: var(--paper); }
+  #picker button:focus-visible { outline: 2px solid var(--paper); outline-offset: 2px; }
+  #picker button.on { color: var(--ink); background: var(--paper); border-color: var(--paper); }
+  #picker button.live { color: var(--ink); background: #7be0a8; border-color: #7be0a8; }
+  #picker button.wait { color: #f2b35a; border-color: rgba(242,179,90,0.55); }
+    gap: 5px; pointer-events: none; }
+  #picker .sep { width: 10px; }
+  #picker .sync { display: none; align-items: center; gap: 4px; color: var(--dim); }
+  body.listening #picker .sync { display: flex; }
+  #picker .sync button { padding: 5px 11px; }
+  #picker, #status { z-index: 6; }
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }   /* stops phones enlarging text in landscape */
+  #cli { position: fixed; inset: 0; z-index: 5; display: none; overflow-x: hidden; overflow-y: auto; background: #0d0a14;
+    padding: 44px max(18px, env(safe-area-inset-right)) 78px max(18px, env(safe-area-inset-left));
+    font: 12.5px/1.6 ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace; color: var(--paper); }
+  body.v-cli #cli, body.v-both #cli { display: block; }
+  body.v-cli canvas { display: none; }
+  /* both: visuals and CLI side by side on wide screens, stacked on tall ones */
+  body.v-both #cli { inset: auto; top: 0; right: 0; bottom: 0; width: var(--cw, 38%); font-size: 11.5px; border-left: 1px solid rgba(233,228,242,0.12); }
+  body.v-both #cli .hd, body.v-both #cli .ms, body.v-both #cli .sz { display: none; }
+  body.v-both #cli .w { width: 11ch; } body.v-both #cli .g { width: 7ch; }
+  @media (orientation: portrait) { body.v-both #cli { top: auto; left: 0; right: 0; width: auto; height: var(--ch, 45%); border-left: 0; border-top: 1px solid rgba(233,228,242,0.12); } }
+  #cli .hd { position: fixed; top: max(14px, env(safe-area-inset-top)); left: max(18px, env(safe-area-inset-left)); color: var(--dim); }
+  #cli .ln { display: flex; align-items: baseline; white-space: nowrap; }
+  #cli .ln > span { flex: none; margin-right: 1ch; }
+  #cli .ln.demo { opacity: 0.55; }
+  #cli .t { width: 8ch; margin-right: 0; } #cli .ms { width: 4ch; }
+  #cli .p { width: 6ch; } #cli .sz { width: 8ch; text-align: right; }
+  #cli .w { width: 14ch; overflow: hidden; text-overflow: ellipsis; } #cli .g { width: 8ch; }
+  #cli .ar { width: 2ch; }
+  #cli .in { flex: 1 1 0; min-width: 0; margin-right: 0; white-space: normal; overflow-wrap: anywhere; }   /* long chords wrap under themselves */
+  #cli .t, #cli .ms, #cli .sz, #cli .ar { color: var(--dim); }
+  #cli .g { color: #f2b35a; }
+  @media (max-width: 640px) {   /* portrait phones: drop the milliseconds and packet size */
+    #cli { font-size: 11px; padding-top: 40px; }
+    #cli .ms, #cli .sz { display: none; }
+    #cli .w { width: 11ch; } #cli .g { width: 7ch; }
+  }
+  @media (max-height: 460px) { #cli { padding-top: 34px; padding-bottom: 64px; } }   /* landscape phones */
+  @media (hover: none) { #cli .hint { display: none; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<canvas id="sp" style="pointer-events:none"></canvas>
+<div id="cli"><div class="hd">$ tail -f netsong</div><div id="cliLines"></div></div>
+<div id="status" class="down fade"><i></i><span id="statusText">connecting</span><span id="ver" style="opacity:.5">v2.0</span></div>
+<nav id="picker" class="fade" aria-label="visualiser"></nav>
+
+<script>
+(() => {
+  const canvas = document.getElementById("c");
+  const mainCtx = canvas.getContext("2d");
+  let ctx = mainCtx;
+  const spCanvas = document.getElementById("sp");
+  const sctx = spCanvas.getContext("2d");   // bluetooth sparkles live on their own layer, over every mode
+  const off = document.createElement("canvas");
+  const octx = off.getContext("2d");
+  const TAU = Math.PI * 2;
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const pick = a => a[(Math.random() * a.length) | 0];
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const lerp = (a, b, t) => a + (b - a) * t;
+  let W = 0, H = 0, dpr = 1;
+  // three views: just the visuals, just the CLI, or both together
+  let view = ({ "#cli": "cli", "#both": "both" })[location.hash] || "visuals";
+  let visualsOn = view !== "cli", cliShown = view !== "visuals";
+
+  // ---------- devices: one colour and one home zone each ----------
+  const devices = new Map();
+  function deviceFor(name) {
+    let d = devices.get(name);
+    if (!d) {
+      const i = devices.size;
+      d = { name, i, hue: (i * 137.508 + 24) % 360, count: 0, last: 0,
+            ax: rnd(0.12, 0.88), ay: rnd(0.2, 0.8), lastTag: 0, pulse: 0,
+            x: rnd(0.15, 0.85) * W, y: rnd(0.2, 0.8) * H, vx: rnd(-30, 30), vy: rnd(-30, 30),
+            pts: [] };
+      devices.set(name, d);
+    }
+    return d;
+  }
+  const col = (d, a, l = 66) => `hsl(${d.hue} 85% ${l}% / ${a})`;
+
+  // short floating name tags, throttled per device so bursts stay readable
+  const tags = [];
+  function tag(x, y, d, now) {
+    if (now - d.lastTag < 1400) return;
+    d.lastTag = now;
+    tags.push({ x, y, d, born: now });
+    if (tags.length > 14) tags.shift();
+  }
+  function drawTags(now) {
+    ctx.font = "13px 'Avenir Next', 'Segoe UI', system-ui, sans-serif";
+    ctx.textBaseline = "alphabetic";
+    for (let i = tags.length - 1; i >= 0; i--) {
+      const g = tags[i], t = (now - g.born) / 3000;
+      if (t >= 1) { tags.splice(i, 1); continue; }
+      ctx.fillStyle = col(g.d, (1 - t) * 0.95, 74);
+      ctx.fillText(g.d.name, g.x + 12, g.y - 12 - t * 16);
+    }
+  }
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (view === "both") { W = innerHeight >= innerWidth ? innerWidth : Math.round(innerWidth * 0.62); H = innerHeight >= innerWidth ? Math.round(innerHeight * 0.55) : innerHeight; }
+    else { W = innerWidth; H = innerHeight; }
+    const root = document.documentElement.style;   // the canvases and the CLI panel share out the screen
+    root.setProperty("--sw", W + "px"); root.setProperty("--sh", H + "px");
+    root.setProperty("--cw", (innerWidth - W) + "px"); root.setProperty("--ch", (innerHeight - H) + "px");
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    spCanvas.width = W * dpr; spCanvas.height = H * dpr; sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    mainCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    off.width = W * dpr; off.height = H * dpr; octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    clearLayers();
+  }
+  function clearLayers() { [mainCtx, octx].forEach(c => { ctx = c; clearAll(); }); ctx = mainCtx; }
+  function clearAll() { ctx.globalCompositeOperation = "source-over"; ctx.fillStyle = "#130f1b"; ctx.fillRect(0, 0, W, H); }
+  function fade(a) { ctx.globalCompositeOperation = "source-over"; ctx.fillStyle = `rgba(19,15,27,${reduced ? Math.max(a, 0.3) : a})`; ctx.fillRect(0, 0, W, H); }
+  // ---------- the visuals: devices around the sonifier, packets fly in ----------
+  const hub = {
+    packets: [], rings: [],
+    init() { this.packets.length = 0; this.rings.length = 0; },
+    pos(d, now, n, R, cx, cy) {
+      const target = -Math.PI / 2 + (d.i / Math.max(n, 1)) * TAU;
+      if (d.ang === undefined) d.ang = target;
+      let diff = ((target - d.ang + Math.PI) % TAU + TAU) % TAU - Math.PI;
+      d.ang += diff * 0.04;
+      const wob = 1 + 0.05 * Math.sin(now / 1700 + d.i * 1.7);
+      d.px = cx + Math.cos(d.ang) * R * wob; d.py = cy + Math.sin(d.ang) * R * wob * 0.82;
+    },
+    spawn(ev, d, now) {
+      const v = ev.vel / 127;
+      d.pulse = 1;
+      const others = [...devices.values()].filter(o => o !== d);
+      const toDevice = others.length && Math.random() < 0.22;   // devices chat to each other too
+      this.packets.push({ d, to: toDevice ? pick(others) : null, born: now,
+        dur: rnd(550, 1500) * (1.25 - v * 0.5), bend: rnd(-0.4, 0.4), v, dash: ev.proto === "bt" });
+    },
+    frame(now) {
+      const cx = W / 2, cy = H / 2, R = Math.min(W, H) * 0.4, n = devices.size;
+      const list = [...devices.values()];
+      list.forEach(d => this.pos(d, now, n, R, cx, cy));
+      ctx = octx; fade(0.16);
+      ctx.globalCompositeOperation = "lighter";
+      const bez = (a, b, c, t) => (1 - t) * (1 - t) * a + 2 * (1 - t) * t * b + t * t * c;
+      for (let i = this.packets.length - 1; i >= 0; i--) {
+        const p = this.packets[i], t = (now - p.born) / p.dur;
+        const tx = p.to ? p.to.px : cx, ty = p.to ? p.to.py : cy;
+        if (t >= 1) {
+          this.rings.push({ x: tx, y: ty, born: now, d: p.d, v: p.v, node: !!p.to });
+          if (p.to) p.to.pulse = 0.8;
+          this.packets.splice(i, 1); continue;
+        }
+        const mx = (p.d.px + tx) / 2 - (ty - p.d.py) * p.bend, my = (p.d.py + ty) / 2 + (tx - p.d.px) * p.bend;
+        ctx.setLineDash(p.dash ? [3, 5] : []);
+        for (let s = 0; s < 8; s++) {
+          const t0 = Math.max(0, t - (s + 1) * 0.025), t1 = Math.max(0, t - s * 0.025);
+          ctx.strokeStyle = col(p.d, (1 - s / 8) * 0.9, 72); ctx.lineWidth = 1 + p.v * 2.4 * (1 - s / 8);
+          ctx.beginPath(); ctx.moveTo(bez(p.d.px, mx, tx, t0), bez(p.d.py, my, ty, t0));
+          ctx.lineTo(bez(p.d.px, mx, tx, t1), bez(p.d.py, my, ty, t1)); ctx.stroke();
+        }
+        ctx.setLineDash([]);
+      }
+      for (let i = this.rings.length - 1; i >= 0; i--) {
+        const g = this.rings[i], t = (now - g.born) / 1600;
+        if (t >= 1) { this.rings.splice(i, 1); continue; }
+        ctx.strokeStyle = col(g.d, Math.pow(1 - t, 1.7) * 0.8);
+        ctx.lineWidth = 1 + g.v * 2 * (1 - t);
+        ctx.beginPath(); ctx.arc(g.x, g.y, 6 + (1 - Math.pow(1 - t, 3)) * (g.node ? 40 : 40 + g.v * 110), 0, TAU); ctx.stroke();
+      }
+      ctx.globalCompositeOperation = "source-over";
+      ctx = mainCtx; clearAll(); ctx.drawImage(off, 0, 0, W, H);
+      list.forEach(d => { ctx.strokeStyle = col(d, 0.12); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(d.px, d.py); ctx.lineTo(cx, cy); ctx.stroke(); });
+      ctx.font = "13px 'Avenir Next', 'Segoe UI', system-ui, sans-serif"; ctx.textBaseline = "middle";
+      list.forEach(d => {
+        d.pulse *= 0.93;
+        ctx.fillStyle = col(d, 0.9 + 0.1 * d.pulse, 62 + d.pulse * 18);
+        ctx.beginPath(); ctx.arc(d.px, d.py, 5 + d.pulse * 7, 0, TAU); ctx.fill();
+        const ox = Math.cos(d.ang) >= 0 ? 14 + d.pulse * 6 : -14 - d.pulse * 6;
+        ctx.textAlign = ox > 0 ? "left" : "right";
+        ctx.fillStyle = col(d, 0.55 + d.pulse * 0.45, 78);
+        ctx.fillText(d.name, d.px + ox, d.py);
+      });
+      ctx.textAlign = "center";
+      ctx.fillStyle = "rgba(233,228,242,0.92)"; ctx.beginPath(); ctx.arc(cx, cy, 6, 0, TAU); ctx.fill();
+      ctx.fillStyle = "rgba(233,228,242,0.5)"; ctx.fillText("sonifier", cx, cy + 22);
+      ctx.textAlign = "left";
+    },
+  };
+
+  // ---------- bluetooth: faint sparkles in the background, in every mode ----------
+  // Not devices and not centre effects: each device keeps its own patch of sky, so a phone that
+  // stays nearby keeps twinkling in the same place. Brighter = closer (the sound is louder too).
+  const sparks_bt = [];
+  function hash01(str, salt) { let h = 2166136261 ^ salt; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return ((h >>> 0) % 10007) / 10007; }
+  function addSparkle(ev, now) {
+    const src = String(ev.src || "bt"), v = ev.vel / 127, spread = Math.min(W, H) * 0.12;
+    const hx = hash01(src, 1), hy = hash01(src, 2), hh = hash01(src, 3);
+    const delay = ev.delay != null ? clamp(ev.delay * 1000, 0, 2500) : 0;   // lines up with the note you hear
+    sparks_bt.push({
+      x: clamp(W * (0.06 + hx * 0.88) + rnd(-spread, spread), 12, W - 12),
+      y: clamp(H * (0.08 + hy * 0.84) + rnd(-spread, spread), 12, H - 12),
+      at: now + delay, life: clamp((ev.dur || 0.5) * 1000, 500, 1800) * rnd(0.9, 1.3),
+      r: 1.1 + v * 1.7, a: 0.22 + v * 0.4, hue: (hh * 360) | 0, ph: rnd(0, TAU), star: Math.random() < 0.6 });
+    if (sparks_bt.length > 80) sparks_bt.splice(0, 20);
+  }
+  function drawSparkles(now) {
+    sctx.clearRect(0, 0, W, H);
+    sctx.globalCompositeOperation = "lighter";
+    for (let i = sparks_bt.length - 1; i >= 0; i--) {
+      const s = sparks_bt[i], t = (now - s.at) / s.life;
+      if (t >= 1) { sparks_bt.splice(i, 1); continue; }
+      if (t < 0) continue;
+      const env = Math.pow(Math.sin(Math.PI * t), 1.4) * (0.75 + 0.25 * Math.sin(now / 55 + s.ph)), al = s.a * env;
+      const g = sctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, s.r * 5);
+      g.addColorStop(0, `hsl(${s.hue} 70% 88% / ${al * 0.5})`); g.addColorStop(1, `hsl(${s.hue} 70% 88% / 0)`);
+      sctx.fillStyle = g; sctx.beginPath(); sctx.arc(s.x, s.y, s.r * 5, 0, TAU); sctx.fill();
+      sctx.fillStyle = `hsl(${s.hue} 60% 92% / ${al})`; sctx.beginPath(); sctx.arc(s.x, s.y, s.r * (0.6 + 0.4 * env), 0, TAU); sctx.fill();
+      if (s.star) {
+        const L = s.r * 5 * env;
+        sctx.strokeStyle = `hsl(${s.hue} 60% 92% / ${al * 0.7})`; sctx.lineWidth = 0.8;
+        sctx.beginPath(); sctx.moveTo(s.x - L, s.y); sctx.lineTo(s.x + L, s.y); sctx.moveTo(s.x, s.y - L); sctx.lineTo(s.x, s.y + L); sctx.stroke();
+      }
+    }
+    sctx.globalCompositeOperation = "source-over";
+  }
+
+
+  // ---------- cli view: what triggered what, and which instrument played ----------
+  const cliEl = document.getElementById("cli"), cliLines = document.getElementById("cliLines");
+  const cliRows = [], cliByTrig = new Map();
+  const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+  const noteName = n => NOTE_NAMES[((Math.round(n) % 12) + 12) % 12] + (Math.floor(Math.round(n) / 12) - 1);
+  const two = n => String(n).padStart(2, "0");
+  function sp(cls, text, hue) {
+    const e = document.createElement("span"); if (cls) e.className = cls; e.textContent = text;
+    if (hue !== undefined) e.style.color = `hsl(${hue} 80% 72%)`; return e;
+  }
+  function instText(list) {
+    const out = [];
+    for (let i = 0; i < list.length;) {
+      let j = i; while (j < list.length && list[j].name === list[i].name) j++;
+      out.push(j - i > 1 ? `${list[i].name}\u00d7${j - i}` : `${list[i].name} ${noteName(list[i].note)}`); i = j;
+    }
+    return out.join(", ");
+  }
+  function cliFill(l) {
+    const hue = (hash01(l.who, 7) * 360) | 0;
+    const size = l.proto === "bt" ? `${l.size}dBm` : `${l.size}B`;
+    l.row.replaceChildren(sp("t", l.time.slice(0, 8)), sp("ms", l.time.slice(8)), sp("p", l.proto, hue), sp("sz", size),
+      sp("w", l.who, hue), sp("g", l.gest), sp("ar", "->"),
+      sp("in", l.insts.length ? instText(l.insts) : "note " + noteName(l.note)));
+  }
+  function cliAdd(ev) {
+    const stick = cliEl.scrollHeight - cliEl.scrollTop - cliEl.clientHeight < 60 || !cliShown;
+    const inst = ev.inst ? { name: ev.inst, note: ev.note } : null;
+    const key = ev.trig != null ? ev.trig + "|" + ev.src : null;
+    let l = key && cliByTrig.get(key);
+    if (l) { if (inst && l.insts.length < 24) l.insts.push(inst); cliFill(l); }   // one trigger, several sounds: one line
+    else {
+      const d = new Date((ev.t || Date.now() / 1000) * 1000);
+      l = { key, row: document.createElement("div"), insts: inst ? [inst] : [], note: ev.note, proto: String(ev.proto),
+        who: String(ev.src || "unknown"), gest: ev.gest || "", size: ev.size != null ? ev.size : "?",
+        time: `${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, "0")}` };
+      l.row.className = "ln" + (ev.live ? "" : " demo");
+      cliFill(l); cliLines.appendChild(l.row); cliRows.push(l);
+      if (key) cliByTrig.set(key, l);
+      while (cliRows.length > 300) { const o = cliRows.shift(); o.row.remove(); if (o.key) cliByTrig.delete(o.key); }
+    }
+    if (stick) cliEl.scrollTop = cliEl.scrollHeight;
+  }
+  // ---------- switching ----------
+  const VIEWS = [["visuals", "Visuals"], ["cli", "CLI"], ["both", "Both"]];
+  const picker = document.getElementById("picker");
+  const viewBtns = VIEWS.map(([id, label]) => {
+    const b = document.createElement("button");
+    b.textContent = label; b.addEventListener("click", () => setView(id)); picker.appendChild(b);
+    return [id, b];
+  });
+
+  // ---------- listen: starts the Pi's audio stream and plays it here; stopping it stops the stream ----------
+  const STREAM_PATH = ":8000/sonifier";   // Icecast on milk, same host as this page
+  const SILENT = "data:audio/wav;base64,UklGRmQGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YUAGAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA";
+  const sep2 = document.createElement("span"); sep2.className = "sep"; picker.appendChild(sep2);
+  const listenBtn = document.createElement("button"); picker.appendChild(listenBtn);
+  const audio = new Audio(); audio.preload = "none"; audio.setAttribute("playsinline", "");
+
+  // The stream reaches your ears a few seconds after the sound is made, so while you listen the visuals wait that long too.
+  // The player's own buffer shows how far behind the live edge it is (most of the lag); BASE_MS covers the Pi's encoding.
+  // If the phone does not report its buffer, FALLBACK_MS is used instead. The +/- buttons trim the result and are remembered.
+  const BASE_MS = 700, FALLBACK_MS = 4500;
+  let trimMs = 0, gapMs = null;
+  try { const v = parseInt(localStorage.getItem("syncTrimMs"), 10); if (v >= -5000 && v <= 5000) trimMs = v; } catch (e) { /* no storage: no trim */ }
+  const syncNow = () => clamp((gapMs != null ? gapMs + BASE_MS : FALLBACK_MS) + trimMs, 0, 20000);
+  const syncBox = document.createElement("span"); syncBox.className = "sync";
+  const syncDown = document.createElement("button"), syncUp = document.createElement("button"), syncText = document.createElement("span");
+  syncDown.textContent = "\u2212"; syncUp.textContent = "+";
+  syncBox.append(syncDown, syncText, syncUp); picker.appendChild(syncBox);
+  function paintSync() { syncText.textContent = (gapMs != null ? "Auto " : "Sync ") + (syncNow() / 1000).toFixed(1) + "s"; }
+  function measureSync() {
+    if (!audioLive) { gapMs = null; paintSync(); return; }
+    let gap = null;
+    try { const b = audio.buffered; if (b.length) gap = (b.end(b.length - 1) - audio.currentTime) * 1000; } catch (e) { /* not reported */ }
+    if (gap != null && gap > 100 && gap < 30000) gapMs = gapMs == null ? gap : gapMs * 0.9 + gap * 0.1;   // smoothed, so it never jumps about
+    paintSync();
+  }
+  function nudge(by) {
+    trimMs = clamp(trimMs + by, -5000, 5000); paintSync();
+    try { localStorage.setItem("syncTrimMs", String(trimMs)); } catch (e) { /* not saved */ }
+  }
+  syncDown.addEventListener("click", () => nudge(-500)); syncUp.addEventListener("click", () => nudge(500)); paintSync();
+  setInterval(measureSync, 1000);
+  let stream = { want: false, actual: "unknown", seen_ago: null };
+  let playing = false, audioLive = false, begun = false, startedAt = 0, retry = 0, failUntil = 0;
+
+  function paintListen() {
+    const piSeen = stream.seen_ago != null && stream.seen_ago < 20, now = Date.now();
+    let text = "Listen", cls = "";
+    if (now < failUntil) { text = "No stream"; cls = "wait"; }
+    else if (playing && audioLive) { text = "Listening"; cls = "live"; }
+    else if (playing && !piSeen && now - startedAt > 12000) { text = "No Pi"; cls = "wait"; }   // nothing on the Pi is answering the switch
+    else if (playing) { text = "Starting..."; cls = "wait"; }
+    listenBtn.textContent = text; listenBtn.className = cls;
+    document.body.classList.toggle("listening", playing);   // shows the sync control
+  }
+  function setWant(v) {
+    stream.want = v;
+    fetch("/api/stream?want=" + (v ? 1 : 0), { method: "POST" }).then(pollStream).catch(() => {});
+  }
+  function maybeBegin() {   // the Pi reports the stream is up: point the player at it
+    if (!playing || begun || !(stream.want && stream.actual === "active")) return;
+    begun = true;
+    audio.src = location.protocol + "//" + location.hostname + STREAM_PATH + "?t=" + Date.now();
+    audio.play().catch(() => {});
+  }
+  function stopListening() {
+    playing = false; begun = false; audioLive = false;
+    audio.pause(); audio.removeAttribute("src"); audio.load();
+    setWant(false); paintListen();   // switching off here also stops the Pi encoding
+  }
+  function giveUp() { failUntil = Date.now() + 4000; stopListening(); setTimeout(paintListen, 4100); }
+  function audioTrouble() {   // stream not there yet, dropped or ended: try again shortly
+    audioLive = false;
+    if (playing && begun) { begun = false; if (++retry > 8) giveUp(); else setTimeout(maybeBegin, 2000); }
+    paintListen();
+  }
+  audio.addEventListener("playing", () => { if (begun) { audioLive = true; retry = 0; paintListen(); } });
+  audio.addEventListener("waiting", () => { audioLive = false; paintListen(); });
+  audio.addEventListener("pause", () => { if (playing && begun) { audioLive = false; paintListen(); } });
+  audio.addEventListener("error", audioTrouble);
+  audio.addEventListener("ended", audioTrouble);
+
+  listenBtn.addEventListener("click", () => {
+    if (playing) return stopListening();
+    playing = true; begun = false; audioLive = false; retry = 0; startedAt = Date.now();
+    audio.src = SILENT; audio.play().catch(() => {});   // the tap unlocks audio on iPhones, so the real stream can start a few seconds later
+    setWant(true); paintListen(); maybeBegin();
+  });
+
+  async function pollStream() {
+    try { stream = await (await fetch("/api/stream", { cache: "no-store" })).json(); } catch (e) { /* milk unreachable: keep the last state */ }
+    if (playing && !audioLive && Date.now() - startedAt > 60000) giveUp();
+    maybeBegin(); paintListen();
+  }
+  (function tick() { pollStream().finally(() => setTimeout(tick, playing && !audioLive ? 1000 : 2500)); })();
+
+  function setView(v) {
+    view = v; visualsOn = v !== "cli"; cliShown = v !== "visuals";
+    const cl = document.body.classList; cl.remove("v-visuals", "v-cli", "v-both"); cl.add("v-" + v);
+    viewBtns.forEach(([id, b]) => b.classList.toggle("on", id === v));
+    history.replaceState(null, "", v === "visuals" ? location.pathname + location.search : "#" + v);
+    resize(); tags.length = 0; clearLayers(); hub.init();   // the picture is a different size in each view
+    if (cliShown) cliEl.scrollTop = cliEl.scrollHeight;
+  }
+
+  // devices that stay silent for two minutes drop off, so the picture does not fill with ghosts
+  setInterval(() => {
+    const now = performance.now();
+    let gone = false;
+    devices.forEach((d, k) => { if (d.last && now - d.last > 120000) { devices.delete(k); gone = true; } });
+    if (gone) [...devices.values()].forEach((d, i) => d.i = i);
+  }, 5000);
+
+  // ---------- main loop ----------
+  // performance.now() rather than the rAF timestamp, which can be earlier than an event that just arrived
+  function loop() { const t = performance.now(); if (visualsOn) { hub.frame(t); drawSparkles(t); } requestAnimationFrame(loop); }
+  addEventListener("resize", resize);
+  setView(view); requestAnimationFrame(loop);
+
+  // ---------- connection to milk ----------
+  const statusEl = document.getElementById("status"), statusText = document.getElementById("statusText");
+  let lastLive = 0;
+  const setStatus = (c, t) => { statusEl.className = c + " fade"; statusText.textContent = t; };
+  const es = new EventSource("/events");
+  es.onopen = () => setStatus("demo", "waiting for notes");
+  es.onerror = () => setStatus("down", "reconnecting");
+  function handleEvent(ev) {
+    const now = performance.now();
+    cliAdd(ev);
+    if (ev.proto === "bt") { if (visualsOn) addSparkle(ev, now); return; }   // bluetooth chatter is background sparkle only
+    const d = deviceFor(String(ev.src || "unknown").slice(0, 40));
+    d.count++; d.last = now;
+    if (visualsOn) hub.spawn(ev, d, now);
+  }
+  es.onmessage = m => {
+    let ev; try { ev = JSON.parse(m.data); } catch { return; }
+    const now = performance.now();
+    if (ev.live) { lastLive = now; setStatus("live", "listening to the sonifier"); }
+    else if (now - lastLive > 4000) setStatus("demo", "demo mode, no sonifier yet");
+    const wait = audioLive ? syncNow() : 0;   // line the visuals up with the audio you can hear
+    if (wait > 0) setTimeout(() => handleEvent(ev), wait); else handleEvent(ev);
+  };
+
+  // ---------- keys, idle, fullscreen ----------
+  let idleTimer;
+  function wake() { document.body.classList.remove("idle"); clearTimeout(idleTimer); idleTimer = setTimeout(() => document.body.classList.add("idle"), 3500); }
+  addEventListener("mousemove", wake); wake();
+  // phones have no mouse: any tap brings the buttons back, and that first tap does nothing else
+  let wokeByTap = 0;
+  addEventListener("pointerdown", () => { if (document.body.classList.contains("idle")) wokeByTap = performance.now(); wake(); }, true);
+  picker.addEventListener("click", e => { if (performance.now() - wokeByTap < 400) { e.stopPropagation(); e.preventDefault(); } }, true);
+  const fs = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.();
+  addEventListener("dblclick", fs);
+  addEventListener("keydown", e => {
+    wake();
+    const at = VIEWS.findIndex(([id]) => id === view);
+    if (e.key >= "1" && e.key <= String(VIEWS.length)) setView(VIEWS[+e.key - 1][0]);
+    else if (e.key === "c" || e.key === " ") { e.preventDefault(); setView(VIEWS[(at + 1) % VIEWS.length][0]); }
+    else if (e.key === "f") fs();
+  });
+})();
+</script>
+</body>
+</html>
