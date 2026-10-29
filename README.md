@@ -206,4 +206,4 @@ Inspired by Floating Points, Four Tet, Aphex Twin and Bonobo. The instrument nam
 
 ## Licence
 
-MIT. See [LICENSE](LICENSE). The libraries and tools this project uses, such as Scapy and SuperCollider, keep their own licences.
+MIT. See [LICENCE](LICENCE). The libraries and tools this project uses, such as Scapy and SuperCollider, keep their own licences.
