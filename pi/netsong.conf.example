@@ -1,0 +1,7 @@
+# Environment for the netsong service. Copy to netsong.conf next to netsong.scd.
+NETSONG_BPM=124
+NETSONG_BUSY=2.5
+NETSONG_VERBOSE=1
+NETSONG_DIR=/home/YOUR_USER
+# Where visualiser events go (default 192.168.1.10), or "off" to disable:
+#NETSONG_VIZ=192.168.1.10
