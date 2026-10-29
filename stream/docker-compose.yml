@@ -1,0 +1,12 @@
+services:
+  icecast:
+    image: moul/icecast
+    container_name: sonifier-stream
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - ICECAST_SOURCE_PASSWORD=${ICECAST_SOURCE_PASSWORD:?set it in .env}
+      - ICECAST_ADMIN_PASSWORD=${ICECAST_ADMIN_PASSWORD:?set it in .env}
+      - ICECAST_PASSWORD=${ICECAST_ADMIN_PASSWORD}
+      - ICECAST_RELAY_PASSWORD=${ICECAST_ADMIN_PASSWORD}
