@@ -93,6 +93,9 @@ A small Python server (standard library only) in Docker. It receives events over
 
 ## Repo layout
 
+<details>
+<summary>Show the folder layout</summary>
+
 ```
 pi/              music engine, sniffers, audio launcher and systemd services
 visualiser/      the web visualiser (Docker)
@@ -100,7 +103,12 @@ stream/          the Icecast server for the audio stream (Docker)
 docs/images/     screenshots
 ```
 
+</details>
+
 ## Setup
+
+<details>
+<summary>Show the setup steps</summary>
 
 ### On the Pi
 
@@ -149,7 +157,12 @@ Open `http://<server>:8095`. In `pi/netsong.scd` the default destination for eve
    Do not enable `netsong-stream` itself. The checker starts and stops it when you press **Listen**.
 3. Open the visualiser and press **Listen**. It takes about 20 seconds to start.
 
+</details>
+
 ## Configuration
+
+<details>
+<summary>Show the settings</summary>
 
 | Setting | Default | What it does |
 | --- | --- | --- |
@@ -159,6 +172,8 @@ Open `http://<server>:8095`. In `pi/netsong.scd` the default destination for eve
 | `NETSONG_DIR` | home folder | Where the `samples` folder lives |
 | `NETSONG_VIZ` | 192.168.1.10 | Where visualiser events are sent. `off` disables it |
 | `FAKE` (visualiser) | auto | Demo traffic: `auto`, `on` or `off` |
+
+</details>
 
 ## Problems I hit
 
